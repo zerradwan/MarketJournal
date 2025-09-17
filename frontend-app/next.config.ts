@@ -1,17 +1,9 @@
 // frontend-app/next.config.ts
-import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
+const nextConfig = {
+  reactStrictMode: true,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-};
-
-export default nextConfig;
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-  reactStrictMode: true,
-};
+} satisfies import("next").NextConfig;
 
 export default nextConfig;
