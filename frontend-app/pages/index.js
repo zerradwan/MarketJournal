@@ -19,11 +19,15 @@ export async function getServerSideProps() {
     const headers = lines[0].split(",").map((s) => s.trim());
 
     const rows = lines.slice(1).map((line) => {
-      const cols = line.split(",").map((s) => s.trim());
-      const obj = {};
-      headers.forEach((h, i) => (obj[h] = cols[i] ?? ""));
-      return obj;
-    }).reverse(); // newest first
+  const cols = line.split(",").map((s) => s.trim());
+  const obj = {};
+  headers.forEach((h, i) => (obj[h] = cols[i] ?? ""));
+  return obj;
+});
+
+// sort by date ascending (oldest → newest)
+rows.sort((a, b) => new Date(a.date) - new Date(b.date));
+
 
     return { props: { headers, rows, error: null } };
   } catch (e) {
