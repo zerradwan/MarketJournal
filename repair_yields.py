@@ -76,7 +76,7 @@ def main():
             if val == "":
                 v = latest_leq(SERIES[col], d)
                 if isinstance(v, float):
-                    r[col] = f"{v:.2f}"
+                    r[col] = f"{v:.4f}"
                     fills += 1
                     print(f"[fill] {dstr} {col} -> {r[col]}")
 
