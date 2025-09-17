@@ -30,7 +30,7 @@ YF_TICKERS = {
     "US 10 YR (%)": "^TNX",
 }
 
-# FRED FALLBACK for JP/DE/UK 10Y (monthly OECD series, carry-forward)
+# FRED fallback for JP/DE/UK 10Y (monthly OECD series, carry-forward)
 FRED_KEY = os.getenv("FRED_API_KEY")
 fred = None
 if FRED_KEY:
@@ -48,13 +48,15 @@ FRED_SERIES = {
 
 # ====== Helpers ======
 def today_str() -> str:
-    # Use the current calendar date where this runs (GitHub Actions runs at 22:05 UTC; fine for “close”)
     return date.today().isoformat()
 
 def get_close_yf(ticker: str, d: date):
-    """Daily close on date d. Use 2-day window and select last row (handles TZ/cal.”"""
+    """Daily close on date d. Use 2-day window and select last row (handles TZ)."""
     try:
-        df = yf.Ticker(ticker).history(start=d, end=d + timedelta(days=2), interval="1d", auto_adjust=False)
+        df = yf.Ticker(ticker).history(
+            start=d, end=d + timedelta(days=2),
+            interval="1d", auto_adjust=False
+        )
         if not df.empty:
             return float(df["Close"].iloc[-1])
     except Exception:
@@ -62,11 +64,12 @@ def get_close_yf(ticker: str, d: date):
     return None
 
 def get_us10y_from_yahoo(d: date):
+    """US 10Y from Yahoo ^TNX (reported in tenths of a percent)."""
     v = get_close_yf("^TNX", d)
-    return None if v is None else (v / 10.0)  # TNX is tenths of a percent
+    return None if v is None else (v / 10.0)
 
 def fred_latest_leq(series_id: str, d: date):
-    """Most recent FRED value on/before d (handles monthly series)."""
+    """Most recent FRED value on/before d (handles monthly series). Returns float or None."""
     if not fred:
         return None
     try:
@@ -122,7 +125,7 @@ def main(target_date: str | None = None):
         if v is not None:
             row[name] = f"{v:.4f}"
 
-    # --- FRED carry-forward for JP/DE/UK 10Y (only if missing after Yahoo step) ---
+    # --- FRED carry-forward for JP/DE/UK 10Y ---
     for name, sid in FRED_SERIES.items():
         if not row.get(name):
             v = fred_latest_leq(sid, d)
@@ -142,6 +145,5 @@ def main(target_date: str | None = None):
     print(f"[{action}] {dstr} -> wrote daily closes at 4dp")
 
 if __name__ == "__main__":
-    # Optional: allow `python fetch_prices.py 2025-09-16`
     import sys
     main(sys.argv[1] if len(sys.argv) > 1 else None)
