@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 import yfinance as yf
 
-# --- FRED (yields) ---
+# --- FRED fallback for non-US 10Y ---
 FRED_KEY = os.getenv("FRED_API_KEY")
 fred = None
 if FRED_KEY:
@@ -27,6 +27,7 @@ HEADERS = [
     "GOLD","BRENT CRUDE","BITCOIN"
 ]
 
+# Yahoo Finance tickers
 YF_TICKERS = {
     "EURO/USD": "EURUSD=X",
     "STG/USD": "GBPUSD=X",
@@ -39,20 +40,21 @@ YF_TICKERS = {
     "GOLD": "GC=F",
     "BRENT CRUDE": "BZ=F",
     "BITCOIN": "BTC-USD",
+    # US 10Y via Yahoo ^TNX (value is 10x the percentage; divide by 10)
+    "US 10 YR (%)": "^TNX",
 }
 
-# US is daily; the others are monthly OECD long-term rate series.
+# FRED fallback (monthly OECD series) for JP/DE/UK 10Y
 FRED_SERIES = {
-    "US 10 YR (%)":  {"id": "DGS10",             "freq": "daily"},
-    "GERMAN 10 YR (%)": {"id": "IRLTLT01DEM156N","freq": "monthly"},
-    "UK 10 YR (%)":     {"id": "IRLTLT01GBM156N","freq": "monthly"},
-    "JAPAN 10 YR (%)":  {"id": "IRLTLT01JPM156N","freq": "monthly"},
+    "GERMAN 10 YR (%)": "IRLTLT01DEM156N",
+    "UK 10 YR (%)":     "IRLTLT01GBM156N",
+    "JAPAN 10 YR (%)":  "IRLTLT01JPM156N",
 }
 
 def iso(s): return datetime.strptime(s, "%Y-%m-%d").date()
 
 def get_close_yf(ticker: str, d: date):
-    """Daily close on date d. Use a 2-day window and pick last row to avoid TZ hiccups."""
+    """Daily close on date d. Use 2-day window and take last row (handles TZ)."""
     try:
         df = yf.Ticker(ticker).history(start=d, end=d + timedelta(days=2), interval="1d", auto_adjust=False)
         if not df.empty:
@@ -61,19 +63,24 @@ def get_close_yf(ticker: str, d: date):
         pass
     return None
 
-def get_fred_latest_leq(series_id: str, d: date):
-    """Most recent FRED value on or BEFORE d (handles monthly series)."""
+def get_us10y_from_yahoo(d: date):
+    v = get_close_yf("^TNX", d)
+    if v is None:
+        return None
+    return v / 10.0  # TNX is in tenths of a percent
+
+def fred_latest_leq(series_id: str, d: date):
     if not fred:
         return None
     try:
-        start = d - timedelta(days=60)  # cover month boundaries comfortably
+        start = d - timedelta(days=90)  # cover month boundaries
         s = fred.get_series(series_id, observation_start=start, observation_end=d)
         if s is not None:
             s = s.dropna()
             if len(s) > 0:
                 return float(s.iloc[-1])
     except Exception:
-        return None
+        pass
     return None
 
 def ensure_header():
@@ -82,47 +89,61 @@ def ensure_header():
         with open(CSV_PATH, "w", newline="") as f:
             csv.writer(f).writerow(HEADERS)
 
-def existing_dates():
-    if not CSV_PATH.exists(): return set()
+def load_rows():
+    if not CSV_PATH.exists(): return []
     with open(CSV_PATH, newline="") as f:
-        return {r["date"] for r in csv.DictReader(f) if r.get("date")}
+        return list(csv.DictReader(f))
+
+def write_rows(headers, rows):
+    with open(CSV_PATH, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=headers)
+        w.writeheader()
+        w.writerows(rows)
 
 def main():
     ensure_header()
-    have = existing_dates()
-    rows = []
+    rows = load_rows()
+    have = {r["date"] for r in rows if r.get("date")}
+    new_rows = []
 
     for dstr in DATES:
-        if dstr in have:
-            print(f"[skip] {dstr} already present"); continue
         d = iso(dstr)
-        row = {h: "" for h in HEADERS}
-        row["date"] = dstr
+        row = next((r for r in rows if r.get("date") == dstr), None)
+        if row is None:
+            row = {h: "" for h in HEADERS}
+            row["date"] = dstr
 
-        # FX, indices, gold, brent, btc
+        # Prices via Yahoo (FX/indices/commodities/BTC)
         for name, t in YF_TICKERS.items():
-            v = get_close_yf(t, d)
-            if v is None:
-                continue
-            # more decimals for FX pairs, 2dp for others
-            row[name] = f"{v:.4f}" if "USD/" in name else f"{v:.2f}"
-
-        # Sovereign 10Y yields (percent). US is daily; others carry forward latest monthly value.
-        for name, meta in FRED_SERIES.items():
-            v = get_fred_latest_leq(meta["id"], d)
+            if name == "US 10 YR (%)":
+                v = get_us10y_from_yahoo(d)
+            else:
+                v = get_close_yf(t, d)
             if v is not None:
-                row[name] = f"{v:.2f}"
+                row[name] = f"{v:.4f}"
 
-        rows.append([row[h] for h in HEADERS])
-        print(f"[ok] prepared {dstr}")
+        # JP/DE/UK 10Y via FRED carry-forward
+        for name, sid in FRED_SERIES.items():
+            if not row.get(name):
+                v = fred_latest_leq(sid, d)
+                if v is not None:
+                    row[name] = f"{v:.4f}"
 
-    if not rows:
-        print("Nothing to append."); return
+        if dstr in have:
+            # update existing row in place
+            for i, r in enumerate(rows):
+                if r.get("date") == dstr:
+                    rows[i] = row
+                    break
+            print(f"[update] {dstr}")
+        else:
+            new_rows.append([row[h] for h in HEADERS])
+            rows.append(row)
+            print(f"[add] {dstr}")
 
-    with open(CSV_PATH, "a", newline="") as f:
-        csv.writer(f).writerows(rows)
-
-    print(f"[done] Appended {len(rows)} rows to {CSV_PATH}")
+    # Rewrite entire CSV to ensure consistent 4dp formatting
+    write_rows(HEADERS, rows)
+    print(f"[done] wrote CSV with {len(rows)} total rows (added {len(new_rows)})")
 
 if __name__ == "__main__":
     main()
