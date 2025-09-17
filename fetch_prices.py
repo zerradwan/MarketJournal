@@ -66,7 +66,7 @@ def get_close_yf(ticker: str, d: date):
 def get_us10y_from_yahoo(d: date):
     """US 10Y from Yahoo ^TNX (reported in tenths of a percent)."""
     v = get_close_yf("^TNX", d)
-    return None if v is None else (v / 10.0)
+    return None if v is None else (v)
 
 def fred_latest_leq(series_id: str, d: date):
     """Most recent FRED value on/before d (handles monthly series). Returns float or None."""

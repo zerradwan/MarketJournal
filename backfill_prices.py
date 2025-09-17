@@ -71,7 +71,7 @@ def get_us10y_from_yahoo(d: date):
     v = get_close_yf("^TNX", d)
     if v is None:
         return None
-    return v / 10.0  # <-- FIX: convert to percent
+    return v  # <-- FIX: convert to percent
 
 def fred_latest_leq(series_id: str, d: date):
     """Most recent FRED value on/before d (handles monthly series). Returns float or None."""
