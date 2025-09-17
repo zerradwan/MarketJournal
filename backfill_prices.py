@@ -1,3 +1,4 @@
+# backfill_prices.py
 import os, csv
 from datetime import datetime, timedelta, date
 from pathlib import Path
@@ -29,7 +30,7 @@ HEADERS = [
 YF_TICKERS = {
     "EURO/USD": "EURUSD=X",
     "STG/USD": "GBPUSD=X",
-    "USD/YEN": "JPY=X",   # USD/JPY
+    "USD/YEN": "JPY=X",          # USD/JPY
     "NIKKEI": "^N225",
     "DAX": "^GDAXI",
     "FTSE": "^FTSE",
@@ -40,32 +41,39 @@ YF_TICKERS = {
     "BITCOIN": "BTC-USD",
 }
 
+# US is daily; the others are monthly OECD long-term rate series.
 FRED_SERIES = {
-    "US 10 YR (%)": "DGS10",
-    "GERMAN 10 YR (%)": "IRLTLT01DEM156N",
-    "UK 10 YR (%)": "IRLTLT01GBM156N",
-    "JAPAN 10 YR (%)": "IRLTLT01JPM156N",
+    "US 10 YR (%)":  {"id": "DGS10",             "freq": "daily"},
+    "GERMAN 10 YR (%)": {"id": "IRLTLT01DEM156N","freq": "monthly"},
+    "UK 10 YR (%)":     {"id": "IRLTLT01GBM156N","freq": "monthly"},
+    "JAPAN 10 YR (%)":  {"id": "IRLTLT01JPM156N","freq": "monthly"},
 }
 
 def iso(s): return datetime.strptime(s, "%Y-%m-%d").date()
 
 def get_close_yf(ticker: str, d: date):
+    """Daily close on date d. Use a 2-day window and pick last row to avoid TZ hiccups."""
     try:
-        df = yf.Ticker(ticker).history(start=d, end=d + timedelta(days=1), interval="1d", auto_adjust=False)
+        df = yf.Ticker(ticker).history(start=d, end=d + timedelta(days=2), interval="1d", auto_adjust=False)
         if not df.empty:
             return float(df["Close"].iloc[-1])
     except Exception:
         pass
     return None
 
-def get_fred(series: str, d: date):
-    if not fred: return None
+def get_fred_latest_leq(series_id: str, d: date):
+    """Most recent FRED value on or BEFORE d (handles monthly series)."""
+    if not fred:
+        return None
     try:
-        s = fred.get_series(series, observation_start=d, observation_end=d)
-        if s is not None and len(s) > 0:
-            return float(s.iloc[-1])
+        start = d - timedelta(days=60)  # cover month boundaries comfortably
+        s = fred.get_series(series_id, observation_start=start, observation_end=d)
+        if s is not None:
+            s = s.dropna()
+            if len(s) > 0:
+                return float(s.iloc[-1])
     except Exception:
-        pass
+        return None
     return None
 
 def ensure_header():
@@ -94,12 +102,14 @@ def main():
         # FX, indices, gold, brent, btc
         for name, t in YF_TICKERS.items():
             v = get_close_yf(t, d)
-            if v is None: continue
+            if v is None:
+                continue
+            # more decimals for FX pairs, 2dp for others
             row[name] = f"{v:.4f}" if "USD/" in name else f"{v:.2f}"
 
-        # Yields (percent)
-        for name, series in FRED_SERIES.items():
-            v = get_fred(series, d)
+        # Sovereign 10Y yields (percent). US is daily; others carry forward latest monthly value.
+        for name, meta in FRED_SERIES.items():
+            v = get_fred_latest_leq(meta["id"], d)
             if v is not None:
                 row[name] = f"{v:.2f}"
 
