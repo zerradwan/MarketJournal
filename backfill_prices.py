@@ -40,7 +40,7 @@ YF_TICKERS = {
     "GOLD": "GC=F",
     "BRENT CRUDE": "BZ=F",
     "BITCOIN": "BTC-USD",
-    # US 10Y via Yahoo ^TNX (value is 10x the percentage; divide by 10)
+    # US 10Y via Yahoo ^TNX (tenths of a percent; divide by 10)
     "US 10 YR (%)": "^TNX",
 }
 
@@ -56,7 +56,10 @@ def iso(s): return datetime.strptime(s, "%Y-%m-%d").date()
 def get_close_yf(ticker: str, d: date):
     """Daily close on date d. Use 2-day window and take last row (handles TZ)."""
     try:
-        df = yf.Ticker(ticker).history(start=d, end=d + timedelta(days=2), interval="1d", auto_adjust=False)
+        df = yf.Ticker(ticker).history(
+            start=d, end=d + timedelta(days=2),
+            interval="1d", auto_adjust=False
+        )
         if not df.empty:
             return float(df["Close"].iloc[-1])
     except Exception:
@@ -64,12 +67,14 @@ def get_close_yf(ticker: str, d: date):
     return None
 
 def get_us10y_from_yahoo(d: date):
+    """US 10Y from Yahoo ^TNX (reported in tenths of a percent)."""
     v = get_close_yf("^TNX", d)
     if v is None:
         return None
-    return v / 10.0  # TNX is in tenths of a percent
+    return v / 10.0  # <-- FIX: convert to percent
 
 def fred_latest_leq(series_id: str, d: date):
+    """Most recent FRED value on/before d (handles monthly series). Returns float or None."""
     if not fred:
         return None
     try:
