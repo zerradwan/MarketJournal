@@ -39,7 +39,7 @@ export default function Home({ headers, rows, error }) {
     <main style={{ maxWidth: 1100, margin: "0 auto", padding: 24, fontFamily: "sans-serif" }}>
       <h1 style={{ fontSize: 36, marginBottom: 8 }}>Market Journal</h1>
       <p style={{ marginBottom: 20, color: "#555" }}>
-        This website was developed by <strong>Neel Dutta Gupta</strong> and <strong>Zain Radwan</strong>, inspired by <strong>Malachy O'Donnabhain</strong>.
+        This website was developed by <strong>Neel Dutta Gupta</strong> and <strong>Zain Radwan</strong>, inspired by <strong>Malachy ODonnabhain</strong>.
       </p>
 
       {error && <p style={{ color: "crimson", marginBottom: 12 }}>Error: {error}</p>}
