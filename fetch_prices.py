@@ -79,10 +79,11 @@ def fred_latest_leq(series_id: str, d: date):
         if s is not None:
             s = s.dropna()
             if len(s) > 0:
-                return float(s.iloc[-1])
+                return float(s.iloc[-1])  # <-- return raw float
     except Exception:
         pass
     return None
+
 
 def ensure_header():
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -156,7 +157,8 @@ def main(target_date: str | None = None):
             if v is None:
                 v = get_last_known_value(rows, name, d)
             if v is not None:
-                row[name] = f"{v:.4f}"
+                row[name] = f"{v:.4f}"  # <-- format once here
+
 
     # upsert
     if dstr in have_by_date:
