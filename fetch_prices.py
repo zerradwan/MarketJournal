@@ -44,6 +44,7 @@ FRED_SERIES = {
     "GERMAN 10 YR (%)": "IRLTLT01DEM156N",
     "UK 10 YR (%)":     "IRLTLT01GBM156N",
     "JAPAN 10 YR (%)":  "IRLTLT01JPM156N",
+    "US 10 YR (%)":     "DGS10",  # Daily series from FRED as fallback
 }
 
 # ====== Helpers ======
@@ -88,10 +89,11 @@ def fred_latest_leq(series_id: str, d: date):
         if s is not None:
             s = s.dropna()
             if len(s) > 0:
-                return float(s.iloc[-1])
+                return float(s.iloc[-1])  # <-- return raw float
     except Exception:
         pass
     return None
+
 
 def ensure_header():
     CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +111,27 @@ def write_rows(headers, rows):
         w = csv.DictWriter(f, fieldnames=headers)
         w.writeheader()
         w.writerows(rows)
+
+def get_last_known_value(rows, col_name: str, before_date: date):
+    """Find the most recent non-empty value for a column before the given date."""
+    last_val = None
+    for r in rows:
+        dstr = r.get("date", "").strip()
+        if not dstr:
+            continue
+        try:
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+            if d >= before_date:
+                continue
+            val_str = r.get(col_name, "").strip()
+            if val_str:
+                try:
+                    last_val = float(val_str)
+                except ValueError:
+                    pass
+        except Exception:
+            continue
+    return last_val
 
 # ====== Main ======
 def main(target_date: str | None = None):
@@ -135,12 +158,17 @@ def main(target_date: str | None = None):
         if v is not None:
             row[name] = f"{v:.4f}"
 
-    # --- FRED carry-forward for JP/DE/UK 10Y ---
+    # --- FRED fallback and carry-forward for all 10Y yields (JP/DE/UK/US) ---
     for name, sid in FRED_SERIES.items():
         if not row.get(name):
+            # Try FRED first
             v = fred_latest_leq(sid, d)
+            # If FRED fails, try to carry forward last known value
+            if v is None:
+                v = get_last_known_value(rows, name, d)
             if v is not None:
-                row[name] = f"{v:.4f}"
+                row[name] = f"{v:.4f}"  # <-- format once here
+
 
     # upsert
     if dstr in have_by_date:
