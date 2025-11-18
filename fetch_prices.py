@@ -51,14 +51,24 @@ def today_str() -> str:
     return date.today().isoformat()
 
 def get_close_yf(ticker: str, d: date):
-    """Daily close on date d. Use 2-day window and select last row (handles TZ)."""
+    """Daily close on date d. If market closed, use previous trading day (carry-forward)."""
     try:
+        # Use a wider window: look back 10 days to find previous trading day if needed
         df = yf.Ticker(ticker).history(
-            start=d, end=d + timedelta(days=2),
+            start=d - timedelta(days=10), end=d + timedelta(days=2),
             interval="1d", auto_adjust=False
         )
         if not df.empty:
-            return float(df["Close"].iloc[-1])
+            # Convert index to date for comparison
+            df.index = df.index.date
+            # First, try exact date
+            if d in df.index:
+                return float(df.loc[d, "Close"])
+            # If exact date not found (market closed), find most recent trading day before d
+            prev_dates = [idx for idx in df.index if idx < d]
+            if prev_dates:
+                most_recent = max(prev_dates)
+                return float(df.loc[most_recent, "Close"])
     except Exception:
         pass
     return None
