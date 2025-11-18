@@ -44,6 +44,7 @@ FRED_SERIES = {
     "GERMAN 10 YR (%)": "IRLTLT01DEM156N",
     "UK 10 YR (%)":     "IRLTLT01GBM156N",
     "JAPAN 10 YR (%)":  "IRLTLT01JPM156N",
+    "US 10 YR (%)":     "DGS10",  # Daily series from FRED as fallback
 }
 
 # ====== Helpers ======
@@ -100,6 +101,27 @@ def write_rows(headers, rows):
         w.writeheader()
         w.writerows(rows)
 
+def get_last_known_value(rows, col_name: str, before_date: date):
+    """Find the most recent non-empty value for a column before the given date."""
+    last_val = None
+    for r in rows:
+        dstr = r.get("date", "").strip()
+        if not dstr:
+            continue
+        try:
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+            if d >= before_date:
+                continue
+            val_str = r.get(col_name, "").strip()
+            if val_str:
+                try:
+                    last_val = float(val_str)
+                except ValueError:
+                    pass
+        except Exception:
+            continue
+    return last_val
+
 # ====== Main ======
 def main(target_date: str | None = None):
     ensure_header()
@@ -125,10 +147,14 @@ def main(target_date: str | None = None):
         if v is not None:
             row[name] = f"{v:.4f}"
 
-    # --- FRED carry-forward for JP/DE/UK 10Y ---
+    # --- FRED fallback and carry-forward for all 10Y yields (JP/DE/UK/US) ---
     for name, sid in FRED_SERIES.items():
         if not row.get(name):
+            # Try FRED first
             v = fred_latest_leq(sid, d)
+            # If FRED fails, try to carry forward last known value
+            if v is None:
+                v = get_last_known_value(rows, name, d)
             if v is not None:
                 row[name] = f"{v:.4f}"
 
