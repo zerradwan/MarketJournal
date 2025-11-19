@@ -3,49 +3,62 @@ import sys
 import requests
 import pandas as pd
 
-FRED_API_KEY = os.getenv("FRED_API_KEY")
-if not FRED_API_KEY:
-    print("ERROR: FRED_API_KEY not set in environment.")
+EODHD_API_TOKEN = os.getenv("EODHD_API_TOKEN")
+if not EODHD_API_TOKEN:
+    print("ERROR: EODHD_API_TOKEN not set in environment.")
     sys.exit(1)
 
-FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations"
+EODHD_BASE_URL = "https://eodhd.com/api/eod"
 
-# FRED series IDs (10Y gov bond yields, %)
-SERIES_MAP = {
-    "GERMAN 10 YR (%)": "IRLTLT01DEM156N",  # Germany :contentReference[oaicite:0]{index=0}
-    "JAPAN 10 YR (%)":  "IRLTLT01JPM156N",  # Japan :contentReference[oaicite:1]{index=1}
-    "UK 10 YR (%)":     "IRLTLT01GBM156N",  # United Kingdom :contentReference[oaicite:2]{index=2}
+# EODHD Government Bond tickers (10Y gov bond, daily data)
+# See EODHD docs: DE10Y.GBOND, JP10Y.GBOND, UK10Y.GBOND
+GBOND_MAP = {
+    "GERMAN 10 YR (%)": "DE10Y.GBOND",  # Germany 10Y
+    "JAPAN 10 YR (%)":  "JP10Y.GBOND",  # Japan 10Y
+    "UK 10 YR (%)":     "UK10Y.GBOND",  # UK 10Y
 }
 
-def fetch_fred_series(series_id: str) -> pd.Series:
+
+def fetch_gbond_series(symbol: str, start_date: str, end_date: str) -> pd.Series:
     """
-    Fetch a FRED series and return it as a pandas Series indexed by date (Timestamp),
-    with float values. Missing values ('.') are dropped.
+    Fetch daily 10Y government bond data from EODHD for the given symbol
+    and return it as a pandas Series indexed by date (Timestamp),
+    using the 'close' field as the yield/price.
     """
     params = {
-        "series_id": series_id,
-        "api_key": FRED_API_KEY,
-        "file_type": "json",
-        # You can tighten this if you want, but this is fine for a small series.
-        "observation_start": "1990-01-01",
+        "api_token": EODHD_API_TOKEN,
+        "fmt": "json",
+        "from": start_date,
+        "to": end_date,
     }
 
-    resp = requests.get(FRED_BASE_URL, params=params, timeout=30)
+    url = f"{EODHD_BASE_URL}/{symbol}"
+    resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
-    data = resp.json()["observations"]
+    data = resp.json()
+
+    if not isinstance(data, list):
+        print(f"Unexpected response for {symbol}: {data}")
+        sys.exit(1)
 
     dates = []
     values = []
-    for obs in data:
-        v = obs["value"]
-        if v == ".":
+    for row in data:
+        # EODHD standard EOD format: {'date': 'YYYY-MM-DD', 'open': ..., 'close': ...}
+        date_str = row.get("date")
+        close_val = row.get("close")
+        if date_str is None or close_val is None:
             continue
-        dates.append(obs["date"])
-        values.append(float(v))
+        dates.append(date_str)
+        values.append(float(close_val))
+
+    if not dates:
+        print(f"No data returned for {symbol} between {start_date} and {end_date}.")
+        return pd.Series(dtype=float)
 
     s = pd.Series(values, index=pd.to_datetime(dates))
-    s.name = series_id
-    return s
+    s.name = symbol
+    return s.sort_index()
 
 
 def main():
@@ -69,7 +82,6 @@ def main():
         sys.exit(1)
 
     # --- Clean the "empty row" ----------------------------------------------
-    # Drop rows that are completely empty (all NaN)
     before = len(df)
     df = df.dropna(how="all")
     after = len(df)
@@ -80,20 +92,30 @@ def main():
     df[date_col] = pd.to_datetime(df[date_col])
     df = df.sort_values(date_col)
 
-    # --- Fetch and align global 10Y yields ----------------------------------
-    for col_name, series_id in SERIES_MAP.items():
-        print(f"Fetching {col_name} from FRED ({series_id})...")
-        s = fetch_fred_series(series_id)  # monthly series
+    start_date = df[date_col].min().strftime("%Y-%m-%d")
+    end_date = df[date_col].max().strftime("%Y-%m-%d")
+    print(f"Fetching bond data from {start_date} to {end_date}.")
 
-        # Reindex to the CSV's dates and forward-fill (e.g., monthly value across days)
-        aligned = s.reindex(df[date_col]).ffill()
+    # --- Fetch and align daily 10Y yields -----------------------------------
+    for col_name, symbol in GBOND_MAP.items():
+        print(f"Fetching {col_name} from EODHD ({symbol})...")
+        s = fetch_gbond_series(symbol, start_date, end_date)
 
-        # If the column doesn't exist yet, create it; otherwise overwrite
+        if s.empty:
+            print(f"WARNING: No data for {symbol}, leaving {col_name} unchanged.")
+            continue
+
+        # Reindex to the CSV's dates and forward-fill across weekends/holidays
+        aligned = (
+            s.reindex(df[date_col])
+             .ffill()
+        )
+
         df[col_name] = aligned.values
 
     # --- Save back to CSV ----------------------------------------------------
     df.to_csv(csv_path, index=False)
-    print(f"Updated {csv_path} with global 10Y yields and removed empty rows.")
+    print(f"Updated {csv_path} with DAILY global 10Y yields and removed empty rows.")
 
 
 if __name__ == "__main__":
